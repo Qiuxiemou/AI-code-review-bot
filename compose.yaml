@@ -1,0 +1,56 @@
+services:
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      DATABASE_URL: postgresql+psycopg://reviewbot:${POSTGRES_PASSWORD}@postgres:5432/reviewbot
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+
+  worker:
+    build: .
+    command: rq worker default --url redis://redis:6379/0
+    environment:
+      DATABASE_URL: postgresql+psycopg://reviewbot:${POSTGRES_PASSWORD}@postgres:5432/reviewbot
+      GITHUB_APP_ID: ${GITHUB_APP_ID}
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
+    volumes:
+      - type: bind
+        source: ${GITHUB_PRIVATE_KEY_PATH}
+        target: /run/secrets/github-app.pem
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: reviewbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: reviewbot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reviewbot -d reviewbot"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
